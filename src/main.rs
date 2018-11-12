@@ -17,11 +17,14 @@ use std::io::{BufWriter, Write};
 
 fn main () {
 
-    let filename = std::env::args().skip(1).next().unwrap();
-    let strategy = std::env::args().skip(2).next().unwrap() == "process";
+    let mut args = std::env::args();
+    args.next().unwrap(); // program name
+    let filename = args.next().unwrap();
+    let strategy = args.next().unwrap() == "process";
 
     // currently need timely's full option set to parse args
     let mut opts = getopts::Options::new();
+    opts.optflag("s", "serialize", "use the zero_copy serialising allocator");
     opts.optopt("w", "workers", "", "");
     opts.optopt("p", "process", "", "");
     opts.optopt("n", "processes", "", "");
@@ -30,11 +33,12 @@ fn main () {
     opts.optopt("o", "output", "", "");
     opts.optopt("i", "max-iterations", "", "");
 
-    if let Ok(matches) = opts.parse(std::env::args().skip(3)) {
+    if let Ok(matches) = opts.parse(args) {
 
         let workers: usize = matches.opt_str("w").map(|x| x.parse().unwrap_or(1)).unwrap_or(1);
         let max_iterations: usize = matches.opt_str("i").map(|x| x.parse().unwrap()).unwrap_or(20);
         let time_info_interval: usize = 10;
+        let serialize: bool = matches.opt_present("s");
 
         let timely_opt_keys = ["w", "p", "n", "h"];
         let matches_copy = matches.clone();
@@ -43,7 +47,7 @@ fn main () {
             .flat_map(|x| x)
             .collect();
 
-        timely::execute_from_args(timely_args.into_iter(), move |root| {
+        macro_rules! worker_closure { () => (move |root| {
 
             let index = root.index() as usize;
             let peers = root.peers() as usize;
@@ -215,7 +219,16 @@ fn main () {
             while root.step() { }
 
             if index == 0 { println!("elapsed: {}", time::precise_time_s() - start); }
-        }).unwrap();
+        }) }
+
+        if !serialize {
+            timely::execute_from_args(timely_args.into_iter(), worker_closure!()).unwrap();
+        } else {
+            eprintln!("NOTE: thread allocators zerocopy, this ignores -p and -n");
+            let allocators =
+                ::timely::communication::allocator::zero_copy::allocator_process::ProcessBuilder::new_vector(workers);
+            timely::execute::execute_from(allocators, Box::new(()), worker_closure!()).unwrap();
+        }
     }
     else {
         println!("error parsing arguments");
