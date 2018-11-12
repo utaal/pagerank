@@ -2,6 +2,7 @@ extern crate mmap;
 extern crate time;
 extern crate timely;
 extern crate getopts;
+extern crate core_affinity;
 
 use timely::dataflow::operators::{Input, Operator, Feedback, ConnectLoop};
 use timely::dataflow::channels::pact::Exchange;
@@ -46,6 +47,10 @@ fn main () {
 
             let index = root.index() as usize;
             let peers = root.peers() as usize;
+
+            // Pin core
+            let core_ids = core_affinity::get_core_ids().unwrap();
+            core_affinity::set_for_current(core_ids[index % core_ids.len()]);
 
             let start = time::precise_time_s();
 
@@ -274,3 +279,4 @@ fn write_pagerank_values_to(output_path: &str, values: &Vec<f32>, peer: usize, p
         }
     }
 }
+
